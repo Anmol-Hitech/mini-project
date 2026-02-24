@@ -1,37 +1,55 @@
-import bcrypt
-from datetime import datetime,timedelta,timezone
-from jose import jwt
-from config import settings
+from datetime import datetime, timezone
+import jwt
+from jwt import PyJWTError
 from fastapi.security import OAuth2PasswordBearer
-from fastapi import Depends,HTTPException
-from sqlalchemy.orm import Session
-from jose import JWTError
-from models import User
-from config.database import get_db
+from fastapi import Depends, HTTPException, status
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-oauth2_scheme=OAuth2PasswordBearer(tokenUrl="login")
+from config.config import settings
+from config.database import get_db
+from models import User
+
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
+
+
 async def get_current_user(
-    token:str = Depends(oauth2_scheme),db:Session=Depends(get_db)
-):
+    token: str = Depends(oauth2_scheme),
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid or expired token",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
     try:
-        payload=jwt.decode(
-            token,settings.SECRET_KEY,algorithms=[settings.ALGORITHM]
+        payload = jwt.decode(
+            token,
+            settings.SECRET_KEY,
+            algorithms=[settings.ALGORITHM],
         )
-        email=payload.get("sub")
+
+        email: str | None = payload.get("sub")
+
         if email is None:
-            raise HTTPException(status_code=401,detail="Invalid token")
-    except JWTError:
-        raise HTTPException(status_code=401,detail="Invalid token")
+            raise credentials_exception
+
+    except PyJWTError:
+        raise credentials_exception
+
     result = await db.execute(
         select(User).where(User.email == email)
     )
     user = result.scalars().first()
-    if not user:
-        raise HTTPException(status_code=400,detail="Not found")
-    
-    return user
 
-def role_required(required_role: str,current_user: User = Depends(get_current_user)):
-    if current_user.role != required_role:
-        raise HTTPException(status_code=403, detail="Access Denied")
-    return current_user
+    if user is None:
+        raise credentials_exception
+
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Inactive user",
+        )
+
+    return user
