@@ -7,7 +7,10 @@ class TeamsCreate(BaseModel):
     def validate_fields(self):
         if not self.name or not self.name.strip():
             raise ValueError("Name cannot be empty")
-
-class TeamsCreateResponse( BaseModel):
+        return self
+class TeamsCreateResponse(BaseModel):
     name:str
     created_by:str
+class AssignTeamRequest(BaseModel):
+    user_id: uuid.UUID
+    team_id: uuid.UUID

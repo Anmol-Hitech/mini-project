@@ -40,4 +40,9 @@ class LoginUser(BaseModel):
     password:str
     name:str
     role:Literal["admin","manager","employee"]
+
+class UpdateUser(BaseModel):
+    email:Optional[EmailStr]=None
+    name:Optional[str]=None
+
     

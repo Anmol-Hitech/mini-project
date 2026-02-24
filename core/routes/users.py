@@ -4,9 +4,10 @@ from sqlalchemy import select
 from config.database import get_db
 from auth.auth import hash_password,verify_password,create_access_token
 from auth.dependency import get_current_user
-from schemas.users import CreateUser, CreateUserResponse,LoginUser
+from schemas.users import CreateUser, CreateUserResponse,LoginUser,UpdateUser
 from models.users import User, RoleEnum
 import uuid
+from utils.email_validator import is_valid_email_regex
 
 userrouter = APIRouter()
 
@@ -100,3 +101,86 @@ async def login(data:LoginUser , db: AsyncSession = Depends(get_db)):
 
     token = create_access_token({"sub": db_user.email})
     return {"access_token": token, "token_type": "bearer"}
+
+@userrouter.post("/deactivate/{email}")
+async def deactivate(email:str,db:AsyncSession=Depends(get_db),current_user:User=Depends(get_current_user)):
+    if is_valid_email_regex(email)==False:
+        raise HTTPException(status_code=400,detail="Enter valid email to deactivate")
+    result=await db.execute(select(User).where(User.email==email))
+    db_user=result.scalars().first()
+
+    if not db_user:
+        raise HTTPException(status_code=400,detail="No user found")
+    
+    if current_user.role=="manager":
+        if db_user.role=="admin":
+            raise HTTPException(status_code=400,detail="You cannot deactivate an admin account")
+    
+    if current_user.role=="employee":
+        if db_user.role=="admin" or db_user.role=="manager":
+            raise HTTPException(status_code=400,detail="Bro...")
+    if db_user.is_active==False:
+        raise HTTPException(status_code=400,detail="Acccount already deactive")
+    db_user.is_active=False
+    await db.commit()
+    await db.refresh(db_user)
+    return {"message":"User deactivated successfully"}
+
+@userrouter.post("/activate/{email}")
+async def deactivate(email:str,db:AsyncSession=Depends(get_db),current_user:User=Depends(get_current_user)):
+    if is_valid_email_regex(email)==False:
+        raise HTTPException(status_code=400,detail="Enter valid email to activate")
+    result=await db.execute(select(User).where(User.email==email))
+    db_user=result.scalars().first()
+
+    if not db_user:
+        raise HTTPException(status_code=400,detail="No user found")
+    
+    if current_user.role=="manager":
+        if db_user.role=="admin":
+            raise HTTPException(status_code=400,detail="You cannot activate an admin account")
+    
+    if current_user.role=="employee":
+        if db_user.role=="admin" or db_user.role=="manager":
+            raise HTTPException(status_code=400,detail="Bro...")
+    
+    if db_user.is_active==True:
+        raise HTTPException(status_code=400,detail="Account already active")
+    db_user.is_active=True
+    await db.commit()
+    await db.refresh(db_user)
+    return {"message":"User activated successfully"}
+
+@userrouter.patch("/update/{email}",response_model=CreateUserResponse)
+async def update_user(email:str,data:UpdateUser,db:AsyncSession=Depends(get_db),current_user:User=Depends(get_current_user)):
+    if current_user.role=="employee":
+        raise HTTPException(status_code=400,detail="Access denied")
+    result=await db.execute(select(User).where(User.email==email))
+    db_user=result.scalars().first()
+    if current_user.role=="manager" and db_user.role=="admin":
+        raise HTTPException(status_code=400,detail="Manager cannot update admin")
+    if data.email is not None:
+        db_user.email=data.email
+    if data.name is not None:
+        db_user.name=data.name
+    await db.commit()
+    await db.refresh(db_user)
+    return {
+        "name":db_user.name,
+        "email":db_user.email,
+        "is_active":db_user.is_active,
+        "role":db_user.role
+    }
+@userrouter.delete("/delete/{email}")
+async def delete_user(email:str,db:AsyncSession=Depends(get_db),current_user:User=Depends(get_current_user)):
+    if current_user.role=="employee":
+        raise HTTPException(status_code=400,detail="Access denied")
+    result=await db.execute(select(User).where(User.email==email))
+    db_user=result.scalars().first()
+    if current_user.role=="manager" and db_user.role=="admin":
+        raise HTTPException(status_code=400,detail="Manager cannot delete admin")
+    db.delete(db_user)
+    await db.commit()
+    return {"message":"User deleted successfully"}
+
+

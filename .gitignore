@@ -1,2 +1,4 @@
 .env
 alembic
+logs
+__pycache__
