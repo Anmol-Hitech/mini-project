@@ -7,7 +7,7 @@ from auth.dependency import get_current_user
 from schemas.users import CreateUser,PromoteEmp, CreateUserResponse,LoginUser,UpdateUser,UserListResponse,TeamRead
 from models.users import User, RoleEnum
 from models.teams import Teams,UserTeam
-from models.tasks import Task
+from models.tasks import Task,TaskStatus
 import datetime
 import uuid
 from utils.email_validator import is_valid_email_regex
@@ -442,3 +442,48 @@ async def all_teams(db:AsyncSession=Depends(get_db),current_user:User=Depends(ge
     )
  
     return teams
+
+@userrouter.get("/tasks/stats")
+async def get_task_stats(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    base_query = select(Task.status, func.count(Task.id)).where(
+        Task.is_deleted == False
+    )
+ 
+    if current_user.role == RoleEnum.ADMIN:
+        query = base_query.group_by(Task.status)
+ 
+    elif current_user.role == RoleEnum.MANAGER:
+        subquery = select(Teams.id).where(
+            Teams.created_by_id == current_user.id,
+            Teams.is_deleted == False,
+        )
+ 
+        query = (
+            base_query
+            .where(Task.team_id.in_(subquery))
+            .group_by(Task.status)
+        )
+ 
+    else:
+        subquery = select(UserTeam.team_id).where(
+            UserTeam.user_id == current_user.id
+        )
+ 
+        query = (
+            base_query
+            .where(Task.team_id.in_(subquery))
+            .group_by(Task.status)
+        )
+ 
+    result = await db.execute(query)
+    rows = result.all()
+ 
+    stats = {status.name: 0 for status in TaskStatus}
+ 
+    for status, count in rows:
+        stats[status.name] = count
+ 
+    return stats

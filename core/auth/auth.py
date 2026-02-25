@@ -49,3 +49,27 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
         return pwd_context.verify(plain_password, hashed_password)
     except Exception:
         return False
+    
+async def generate_token(data:dict):
+    to_encode = data.copy()
+    expire = datetime.now(timezone.utc) + timedelta(
+        hours=settings.INVITE_TOKEN_EXPIRE_TIME
+    )
+    to_encode.update({"exp": expire})
+
+    return jwt.encode(
+        to_encode,
+        settings.INVITE_KEY,
+        algorithm=settings.ALGORITHM
+    )
+
+def decode_invite_token(token:dict):
+    try:
+        payload = jwt.decode(
+            token,
+            settings.INVITE_KEY,
+            algorithms=[settings.ALGORITHM]
+        )
+        return payload
+    except InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Invalid or expired invite token")

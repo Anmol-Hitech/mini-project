@@ -8,6 +8,8 @@ class Settings(BaseSettings):
     EMAIL_PASSWORD:str
     SMTP_SERVER:str
     SMTP_PORT:int
+    INVITE_KEY:str
+    INVITE_TOKEN_EXPIRE_TIME:int
     model_config=SettingsConfigDict(env_file=".env")
 
     

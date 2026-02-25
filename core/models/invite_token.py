@@ -15,7 +15,9 @@ class InviteToken(Base):
         default=uuid.uuid4,
         index=True
     )
-
+    token:Mapped[str]=mapped_column(
+        unique=True
+    )
     team_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("teams_table.id", ondelete="CASCADE"),
         nullable=False

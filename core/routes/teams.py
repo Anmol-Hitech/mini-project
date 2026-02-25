@@ -106,7 +106,7 @@ async def get_team(team_id:uuid.UUID,db:AsyncSession=Depends(get_db),current_use
         "is_deleted":db_team.is_deleted
     }
 
-@teamrouter.get("/delete-team/{team_id}",response_model=GetTeam)
+@teamrouter.delete("/delete-team/{team_id}")
 async def get_team(team_id:uuid.UUID,db:AsyncSession=Depends(get_db),current_user:User=Depends(get_current_user)):
     result=await db.execute(select(Teams).where(Teams.id==team_id))
     db_team=result.scalars().first()
