@@ -49,3 +49,22 @@ class AssignTeamSchema(BaseModel):
     team_id: uuid.UUID
 class AssignUserSchema(BaseModel):
     assignee_id: uuid.UUID
+
+class TaskUniversalUpdate(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    priority: Optional[TaskPriority] = None
+    team_id: Optional[uuid.UUID] = None
+    assignee_id: Optional[uuid.UUID] = None
+class TaskDetailResponse(BaseModel):
+    id: uuid.UUID
+    title: str
+    description: Optional[str] = None
+    priority: str
+    status: str
+    created_by: str
+    team_id: Optional[uuid.UUID] = None
+    assigned_to: Optional[str] = None
+
+class TaskStatusUpdate(BaseModel):
+    status: TaskStatus

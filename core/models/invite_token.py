@@ -27,7 +27,7 @@ class InviteToken(Base):
     )
 
     expires_at: Mapped[DateTime] = mapped_column(
-        DateTime,
+        DateTime(timezone=True),
         nullable=False
     )
 

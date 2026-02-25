@@ -1,15 +1,16 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status,BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from config.database import get_db
 from auth.dependency import get_current_user
-from schemas.tasks import TaskCreate,TaskCreateRes,TaskPriority,BulkTaskCreate,TaskStatsPriority,TaskStats,AssignTeamSchema,AssignUserSchema
+from schemas.tasks import TaskCreate,TaskCreateRes,TaskDetailResponse,TaskStatusUpdate,TaskPriority,BulkTaskCreate,TaskStatsPriority,TaskStats,AssignTeamSchema,AssignUserSchema,TaskUniversalUpdate
 from models.users import User, RoleEnum
 from models.teams import Teams
 from models.tasks import Task,TaskStatus
 from models.teams import UserTeam
 import uuid
 from utils.email_validator import is_valid_email_regex
+from utils.email_send import send_task_completion_email
 
 taskrouter=APIRouter()
 
@@ -130,3 +131,190 @@ async def assign_task_to_user(
     await db.refresh(task)
 
     return {"message": "Task assigned to user successfully"}
+
+@taskrouter.patch("/update-task/{task_id}")
+async def update_task(
+    task_id: uuid.UUID,
+    data: TaskUniversalUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    result = await db.execute(select(Task).where(Task.id == task_id))
+    task = result.scalars().first()
+
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    if task.created_by_id != current_user.id:
+        raise HTTPException(
+            status_code=403,
+            detail="Only task creator can update this task"
+        )
+
+    if hasattr(data, "status"):
+        raise HTTPException(
+            status_code=400,
+            detail="Status cannot be updated from this endpoint"
+        )
+
+    if data.title is not None:
+        task.title = data.title.strip()
+
+    if data.description is not None:
+        task.description = data.description
+
+    if data.priority is not None:
+        task.priority = data.priority
+
+    if data.team_id is not None:
+        team = await db.get(Teams, data.team_id)
+        if not team:
+            raise HTTPException(status_code=404, detail="Team not found")
+
+        if team.created_by_id != current_user.id:
+            raise HTTPException(
+                status_code=403,
+                detail="You can only assign task to your own teams"
+            )
+
+        task.team_id = data.team_id
+        task.assignee_id = None  
+
+    if data.assignee_id is not None:
+        if not task.team_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Task must belong to a team before assigning user"
+            )
+
+        member_check = await db.execute(
+            select(UserTeam).where(
+                UserTeam.user_id == data.assignee_id,
+                UserTeam.team_id == task.team_id
+            )
+        )
+
+        if not member_check.scalar_one_or_none():
+            raise HTTPException(
+                status_code=400,
+                detail="User is not a member of this team"
+            )
+
+        task.assignee_id = data.assignee_id
+
+    await db.commit()
+    await db.refresh(task)
+
+    return {"message": "Task updated successfully"}
+@taskrouter.delete("/delete-task/{task_id}")
+async def soft_delete_task(
+    task_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    result = await db.execute(
+        select(Task).where(Task.id == task_id)
+    )
+    task = result.scalars().first()
+
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    if task.is_deleted:
+        raise HTTPException(status_code=400, detail="Task already deleted")
+
+    if task.created_by_id != current_user.id:
+        raise HTTPException(
+            status_code=403,
+            detail="Only task creator can delete this task"
+        )
+
+    task.is_deleted = True
+
+    await db.commit()
+
+    return {"message": "Task deleted successfully"}
+@taskrouter.get("/view-task/{task_id}", response_model=TaskDetailResponse)
+async def view_task(
+    task_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    result = await db.execute(
+        select(Task).where(
+            Task.id == task_id,
+            Task.is_deleted == False
+        )
+    )
+    task = result.scalars().first()
+
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    creator = await db.get(User, task.created_by_id)
+
+    assignee_name = None
+    if task.assignee_id:
+        assignee = await db.get(User, task.assignee_id)
+        assignee_name = assignee.name if assignee else None
+
+    return {
+        "id": task.id,
+        "title": task.title,
+        "description": task.description,
+        "priority": task.priority,
+        "status": task.status,
+        "created_by": creator.name if creator else None,
+        "team_id": task.team_id,
+        "assigned_to": assignee_name
+    }
+@taskrouter.patch("/update-status/{task_id}")
+async def update_task_status(
+    background_tasks:BackgroundTasks,
+    task_id: uuid.UUID,
+    data: TaskStatusUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    result = await db.execute(
+        select(Task).where(
+            Task.id == task_id,
+            Task.is_deleted == False
+        )
+    )
+    task = result.scalars().first()
+
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    if current_user.role=="admin":
+        raise HTTPException(status_code=403,detail="Admin not allowed")
+    
+    if not task.assignee_id and current_user.role==RoleEnum.EMPLOYEE:
+        raise HTTPException(
+            status_code=400,
+            detail="Task is not assigned to any employee"
+        )
+
+    if task.assignee_id != current_user.id and current_user.role==RoleEnum.EMPLOYEE:
+        raise HTTPException(
+            status_code=403,
+            detail="You can only update your assigned tasks"
+        )
+    if current_user.role=="employee" and data.status=="done":
+        created_id=task.created_by_id
+        result2=await db.execute(select(User).where(User.id==created_id))
+        db_creator=result2.scalars().first()
+        creator_email=db_creator.email
+        task_title=task.title
+        background_tasks.add_task(send_task_completion_email,creator_email,task_title)
+        print(f"DEBUG: Email task added for {current_user.email} regarding {task_title}")
+    task.status = data.status
+
+    await db.commit()
+    await db.refresh(task)
+
+    return {
+        "message": "Task status updated successfully",
+        "new_status": task.status
+    }

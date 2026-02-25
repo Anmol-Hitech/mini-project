@@ -14,3 +14,35 @@ class TeamsCreateResponse(BaseModel):
 class AssignTeamRequest(BaseModel):
     user_id: uuid.UUID
     team_id: uuid.UUID
+class GetTeam(BaseModel):
+    team_id: uuid.UUID
+    name:str
+    created_by_id:uuid.UUID
+    is_deleted:bool
+
+class TeamMemberStats(BaseModel):
+    id: uuid.UUID
+    name: str
+    email: str
+    task_count: int
+ 
+ 
+class ManagerDetails(BaseModel):
+    id: uuid.UUID
+    name: str
+    email: str
+ 
+ 
+class TeamDetailResponse(BaseModel):
+    team_id: uuid.UUID
+    team_name: str
+    task_count: int
+    member_count: int
+    manager: ManagerDetails
+    members: List[TeamMemberStats]
+
+class TeamRead(BaseModel):
+    id:uuid.UUID
+    name:str
+    created_by_id:uuid.UUID
+    is_deleted:bool

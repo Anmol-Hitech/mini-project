@@ -19,7 +19,6 @@ class User(Base):
     role: Mapped[RoleEnum] = mapped_column(Enum(RoleEnum), nullable=False)
     is_active: Mapped[bool] = mapped_column(default=True)
 
-    # Relationships
     teams_created: Mapped[list["Teams"]] = relationship("Teams", back_populates="creator", cascade="all, delete")
     tasks_created: Mapped[list["Task"]] = relationship("Task", back_populates="creator", cascade="all, delete", foreign_keys="Task.created_by_id")
     tasks_assigned: Mapped[list["Task"]] = relationship("Task", back_populates="assignee", cascade="all, delete", foreign_keys="Task.assignee_id")

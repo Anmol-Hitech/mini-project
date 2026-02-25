@@ -1,6 +1,7 @@
 from pydantic import BaseModel,EmailStr,model_validator
 from typing import List,Optional,Literal
 from fastapi import HTTPException
+from models.users import RoleEnum
 import uuid
 import re
 class CreateUser(BaseModel):
@@ -45,4 +46,17 @@ class UpdateUser(BaseModel):
     email:Optional[EmailStr]=None
     name:Optional[str]=None
 
-    
+class UserListResponse(BaseModel):
+    id: uuid.UUID
+    name: str
+    email: str
+    role: RoleEnum
+    is_active: bool    
+
+class PromoteEmp(BaseModel):
+    team_name:Optional[str]=None
+class TeamRead(BaseModel):
+    id:uuid.UUID
+    name:str
+    created_by_id:uuid.UUID
+    is_deleted:bool
