@@ -9,6 +9,7 @@ from models.teams import Teams
 from models.tasks import Task,TaskStatus
 from models.teams import UserTeam
 import uuid
+import datetime
 from utils.email_validator import is_valid_email_regex
 from utils.email_send import send_task_completion_email
 
@@ -56,7 +57,8 @@ async def assign_task_to_team(
     if current_user.role != RoleEnum.MANAGER:
         raise HTTPException(status_code=403, detail="Only manager can assign team")
 
-    result = await db.execute(select(Task).where(Task.id == task_id))
+    result = await db.execute(select(Task).where(Task.id == task_id,
+            Task.is_deleted == False))
     task = result.scalars().first()
 
     if not task:
@@ -88,7 +90,8 @@ async def assign_task_to_user(
     if current_user.role != RoleEnum.MANAGER:
         raise HTTPException(status_code=403, detail="Only manager can assign user")
 
-    result = await db.execute(select(Task).where(Task.id == task_id))
+    result = await db.execute(select(Task).where(Task.id == task_id,
+            Task.is_deleted == False))
     task = result.scalars().first()
 
     if not task:
@@ -139,7 +142,8 @@ async def update_task(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    result = await db.execute(select(Task).where(Task.id == task_id))
+    result = await db.execute(select(Task).where(Task.id == task_id,
+            Task.is_deleted == False))
     task = result.scalars().first()
 
     if not task:
@@ -432,3 +436,98 @@ async def bulk_delete_tasks(
     except Exception as e:
         await db.rollback()
         raise HTTPException(status_code=500, detail=f"Server error during bulk delete {e}")
+    
+from fastapi import Query
+from sqlalchemy import and_, or_, asc, desc
+from typing import List, Optional
+
+
+@taskrouter.get("/tasks")
+async def get_tasks(
+    search: Optional[str] = Query(None),
+    status: Optional[List[TaskStatus]] = Query(None),
+    start_date: Optional[datetime.datetime] = Query(None),
+    end_date: Optional[datetime.datetime] = Query(None),
+    sort_by: Optional[str] = Query(None),
+    sort_order: Optional[str] = Query("asc"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    query = select(Task).where(Task.is_deleted == False)
+
+    if current_user.role == RoleEnum.MANAGER:
+        subquery = select(Teams.id).where(
+            Teams.created_by_id == current_user.id,
+            Teams.is_deleted == False
+        )
+        query = query.where(Task.team_id.in_(subquery))
+
+    elif current_user.role == RoleEnum.EMPLOYEE:
+        query = query.where(Task.assignee_id == current_user.id)
+
+    if search:
+        query = query.where(
+            or_(
+                Task.title.ilike(f"%{search}%"),
+                Task.description.ilike(f"%{search}%")
+            )
+        )
+    if status:
+        query = query.where(Task.status.in_(status))
+    if start_date and end_date:
+        query = query.where(
+            Task.created_at.between(start_date, end_date)
+        )
+
+    if sort_by:
+        sort_column = None
+
+        if sort_by == "priority":
+            sort_column = Task.priority
+        elif sort_by == "due_date":
+            sort_column = Task.due_date
+        elif sort_by == "created_at":
+            sort_column = Task.created_at
+
+        if sort_column is not None:
+            if sort_order == "desc":
+                query = query.order_by(desc(sort_column))
+            else:
+                query = query.order_by(asc(sort_column))
+
+    result = await db.execute(query)
+    tasks = result.scalars().all()
+
+    return tasks
+
+
+
+@taskrouter.patch("/restore-task/{task_id}")
+async def restore_task(
+    task_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    if current_user.role != RoleEnum.ADMIN:
+        raise HTTPException(status_code=403, detail="Only admin can restore tasks")
+
+    result = await db.execute(
+        select(Task).where(Task.id == task_id)
+    )
+    task = result.scalars().first()
+
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    if not task.is_deleted:
+        raise HTTPException(status_code=400, detail="Task is not deleted")
+
+    task.is_deleted = False
+
+    await db.commit()
+    await db.refresh(task)
+
+    return {
+        "message": "Task restored successfully",
+        "task_id": task.id
+    }

@@ -10,6 +10,7 @@ from models.teams import Teams,UserTeam
 from models.tasks import Task,TaskStatus
 import datetime
 import uuid
+from typing import List
 from utils.email_validator import is_valid_email_regex
 
 userrouter = APIRouter()
@@ -487,3 +488,27 @@ async def get_task_stats(
         stats[status.name] = count
  
     return stats
+
+@userrouter.get("/search", response_model=List[CreateUserResponse])
+async def search_users(
+    email_prefix: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    if current_user.role != RoleEnum.ADMIN:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    result = await db.execute(
+        select(User).where(User.email.ilike(f"{email_prefix}%"))
+    )
+    users = result.scalars().all()
+
+    return [
+        {
+            "name": user.name,
+            "email": user.email,
+            "role": user.role,
+            "is_active": user.is_active
+        }
+        for user in users
+    ]

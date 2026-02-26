@@ -1,4 +1,4 @@
-from sqlalchemy import Integer,String,Enum,ForeignKey,UUID,DateTime
+from sqlalchemy import Integer,String,Enum,ForeignKey,UUID,DateTime,func
 import uuid
 from sqlalchemy.orm import Mapped,mapped_column,relationship
 import enum
@@ -36,7 +36,16 @@ class Task(Base):
     nullable=True
 )
     is_deleted: Mapped[bool] = mapped_column(default=False)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+    DateTime(timezone=True),
+    server_default=func.now(),
+    nullable=False
+)
 
+    due_date: Mapped[datetime.datetime | None] = mapped_column(
+    DateTime(timezone=True),
+    nullable=True
+)
     team: Mapped["Teams | None"] = relationship(
     "Teams",
     back_populates="tasks"
